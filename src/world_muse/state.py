@@ -8,6 +8,7 @@ class StoryNode:
     id: str
     label: str
     summary: str = ""
+    details: dict[str, str] = field(default_factory=dict)
     children: list["StoryNode"] = field(default_factory=list)
 
 

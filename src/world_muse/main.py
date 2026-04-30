@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import AppSettings, default_config_dir, discover_worlds, load_settings, save_settings, update_selection
-from .state import StoryNode, default_story_structure
+from .state import StoryNode, default_story_structure, find_node_by_id
 from .status import StatusLog
+from .wizards.setting_wizard import SettingWizardSession
 
 
 def build_app(*, config_dir: Path | None = None) -> None:
@@ -52,6 +53,7 @@ def render_layout(
     from nicegui import ui
 
     selected: dict[str, Any] = {"node": structure[0] if structure else None}
+    status_renderer: dict[str, Callable[[], None]] = {"render": lambda: None}
 
     ui.query("body").classes("m-0 overflow-hidden")
     ui.add_head_html(
@@ -71,7 +73,67 @@ def render_layout(
         """
     )
     with ui.column().classes("w-full h-screen gap-0 bg-slate-50"):
-        top_panel(settings, config_dir, status_log, world_options)
+        def add_status(level: str, text: str) -> None:
+            status_log.add(level, text)
+            status_renderer["render"]()
+            color = {"info": "positive", "warning": "warning", "error": "negative"}.get(level, "info")
+            ui.notify(text, color=color)
+
+        def open_setting_wizard() -> None:
+            wizard = SettingWizardSession()
+            with ui.dialog() as dialog, ui.card().classes("w-[760px] max-w-full"):
+                ui.label("Create Setting Wizard").classes("text-lg font-semibold")
+                progress_label = ui.label().classes("text-xs text-slate-500")
+                question_label = ui.label().classes("text-base text-slate-800")
+                answer_input = ui.textarea(label="Your response").classes("w-full").props("autogrow")
+                with ui.row().classes("w-full justify-between pt-2"):
+                    prev_btn = ui.button("Prev")
+                    next_btn = ui.button("Next")
+                    submit_btn = ui.button("Submit").props("color=primary")
+
+                def sync_view() -> None:
+                    progress_label.text = f"Question {wizard.index + 1} of {wizard.total}"
+                    question_label.text = wizard.current_question
+                    answer_input.value = wizard.current_answer
+                    prev_btn.set_enabled(not wizard.is_first)
+                    next_btn.set_visibility(not wizard.is_last)
+                    submit_btn.set_visibility(wizard.is_last)
+                    progress_label.update()
+                    question_label.update()
+                    answer_input.update()
+
+                def capture_answer(event) -> None:
+                    wizard.set_current_answer(str(event.value or ""))
+
+                def on_prev() -> None:
+                    wizard.set_current_answer(str(answer_input.value or ""))
+                    wizard.prev()
+                    sync_view()
+
+                def on_next() -> None:
+                    wizard.set_current_answer(str(answer_input.value or ""))
+                    wizard.next()
+                    sync_view()
+
+                def on_submit() -> None:
+                    wizard.set_current_answer(str(answer_input.value or ""))
+                    setting_node = find_node_by_id(structure, "setting")
+                    if setting_node is not None:
+                        setting_node.summary = wizard.build_summary()
+                        setting_node.details = wizard.as_detail_map()
+                        selected["node"] = setting_node
+                        render_right_panel()
+                    add_status("info", "Setting wizard submitted.")
+                    dialog.close()
+
+                answer_input.on_value_change(capture_answer)
+                prev_btn.on_click(on_prev)
+                next_btn.on_click(on_next)
+                submit_btn.on_click(on_submit)
+                sync_view()
+            dialog.open()
+
+        top_panel(settings, config_dir, world_options, add_status, on_launch_setting_wizard=open_setting_wizard)
         with ui.row().classes("w-full grow gap-0 overflow-hidden"):
             def on_select(node: StoryNode) -> None:
                 selected["node"] = node
@@ -92,16 +154,23 @@ def render_layout(
                     ui.separator().classes("my-2")
                     ui.label(f"Node ID: {node.id}").classes("text-xs text-slate-500")
                     ui.label(f"Children: {len(node.children)}").classes("text-xs text-slate-500")
+                    if node.details:
+                        ui.separator().classes("my-2")
+                        for key, value in node.details.items():
+                            ui.label(key).classes("text-xs font-semibold text-slate-600")
+                            ui.label(value or "(no response)").classes("text-sm text-slate-700")
 
             render_right_panel()
-        bottom_panel(status_log)
+        status_renderer["render"] = bottom_panel(status_log)
 
 
 def top_panel(
     settings: AppSettings,
     config_dir: Path,
-    status_log: StatusLog,
     world_options: list[str],
+    add_status,
+    *,
+    on_launch_setting_wizard,
 ) -> None:
     from nicegui import ui
 
@@ -132,12 +201,12 @@ def top_panel(
         def save_project() -> None:
             update_selection(settings, story_project=str(story_input.value or ""))
             save_settings(settings, config_dir)
-            status_log.info("Updated story project.")
+            add_status("info", "Updated story project.")
 
         def save_world() -> None:
             update_selection(settings, world=str(world_select.value or ""))
             save_settings(settings, config_dir)
-            status_log.info("Updated current world.")
+            add_status("info", "Updated current world.")
 
         def save_provider() -> None:
             provider = str(provider_select.value or settings.current_provider)
@@ -148,17 +217,18 @@ def top_panel(
             update_selection(settings, provider=provider, model=str(model_select.value or ""))
             save_settings(settings, config_dir)
             model_select.update()
-            status_log.info(f"Provider set to {provider}.")
+            add_status("info", f"Provider set to {provider}.")
 
         def save_model() -> None:
             update_selection(settings, model=str(model_select.value or ""))
             save_settings(settings, config_dir)
-            status_log.info("Updated model.")
+            add_status("info", "Updated model.")
 
         story_input.on_value_change(lambda _: save_project())
         world_select.on_value_change(lambda _: save_world())
         provider_select.on_value_change(lambda _: save_provider())
         model_select.on_value_change(lambda _: save_model())
+        ui.button("Create Setting", on_click=on_launch_setting_wizard).props("color=primary")
 
 
 def left_panel(structure: list[StoryNode], *, on_select) -> None:
@@ -186,13 +256,19 @@ def render_story_node(node: StoryNode, *, on_select) -> None:
             render_story_node(child, on_select=on_select)
 
 
-def bottom_panel(status_log: StatusLog) -> None:
+def bottom_panel(status_log: StatusLog):
     from nicegui import ui
 
-    with ui.column().classes("w-full h-28 overflow-auto border-t border-slate-300 bg-slate-100 px-4 py-2"):
-        ui.label("Status").classes("text-xs font-semibold uppercase text-slate-500")
-        for message in status_log.messages[-10:]:
-            ui.label(f"{message.level.upper()}: {message.text}").classes(status_class(message.level))
+    with ui.column().classes("w-full h-28 overflow-auto border-t border-slate-300 bg-slate-100 px-4 py-2") as container:
+        def render() -> None:
+            container.clear()
+            with container:
+                ui.label("Status").classes("text-xs font-semibold uppercase text-slate-500")
+                for message in status_log.messages[-10:]:
+                    ui.label(f"{message.level.upper()}: {message.text}").classes(status_class(message.level))
+
+        render()
+        return render
 
 
 def status_class(level: str) -> str:
