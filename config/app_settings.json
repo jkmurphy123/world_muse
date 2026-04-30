@@ -1,0 +1,22 @@
+{
+  "current_model": "mock-world-muse-v1",
+  "current_provider": "mock",
+  "current_story_project": "my-story",
+  "current_world": "titan-osa",
+  "models_by_provider": {
+    "mock": [
+      "mock-world-muse-v1"
+    ],
+    "openai": [
+      "gpt-4.1"
+    ]
+  },
+  "providers": [
+    "mock",
+    "openai"
+  ],
+  "world_roots": [
+    "/home/ubuntu/projects/world_muse/worlds",
+    "/home/ubuntu/projects/worldcodex/worlds"
+  ]
+}

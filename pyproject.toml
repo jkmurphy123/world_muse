@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "world-muse"
+version = "0.1.0"
+description = "Wizard-driven story creation GUI."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "nicegui>=1.4.27",
+]
+
+[project.scripts]
+world-muse = "world_muse.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
