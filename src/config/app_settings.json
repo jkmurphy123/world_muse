@@ -1,4 +1,6 @@
 {
+  "agent_foundry_executable": "agent-foundry",
+  "agent_foundry_working_directory": "",
   "current_model": "mock-world-muse-v1",
   "current_provider": "mock",
   "current_story_project": "my-story",
@@ -15,6 +17,7 @@
     "mock",
     "openai"
   ],
+  "use_ai_questions": true,
   "world_roots": [
     "/home/ubuntu/projects/world_muse/src/worlds",
     "/home/ubuntu/projects/worldcodex/worlds"

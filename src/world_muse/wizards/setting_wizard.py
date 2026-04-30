@@ -59,6 +59,11 @@ class SettingWizardSession:
     def as_detail_map(self) -> dict[str, str]:
         return {f"Q{i + 1}: {question}": self.answers[i].strip() for i, question in enumerate(self.questions)}
 
+    def set_question(self, index: int, question: str) -> None:
+        if index < 0 or index >= self.total:
+            return
+        self.questions[index] = question.strip() or self.questions[index]
+
     def build_summary(self) -> str:
         non_empty = [answer.strip() for answer in self.answers if answer.strip()]
         if not non_empty:

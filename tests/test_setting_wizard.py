@@ -37,3 +37,12 @@ def test_setting_wizard_summary_and_detail_map():
     assert summary == "The Ashbelt"
     assert len(details) == 5
     assert list(details.values())[2] == "Memory fades after sunset"
+
+
+def test_setting_wizard_set_question_updates_indexed_question():
+    wizard = SettingWizardSession()
+    original = wizard.questions[1]
+    wizard.set_question(1, "How does this world's economy function?")
+
+    assert wizard.questions[1] == "How does this world's economy function?"
+    assert wizard.questions[1] != original

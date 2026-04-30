@@ -21,6 +21,9 @@ class AppSettings:
     current_world: str = ""
     current_provider: str = DEFAULT_PROVIDER
     current_model: str = DEFAULT_MODEL
+    use_ai_questions: bool = True
+    agent_foundry_executable: str = "agentfoundry"
+    agent_foundry_working_directory: str = field(default_factory=lambda: default_agent_foundry_project_dir())
     world_roots: list[str] = field(default_factory=lambda: default_world_roots())
     providers: list[str] = field(default_factory=lambda: list(DEFAULT_PROVIDERS))
     models_by_provider: dict[str, list[str]] = field(
@@ -38,6 +41,13 @@ class AppSettings:
             current_world=str(payload.get("current_world", defaults.current_world)),
             current_provider=str(payload.get("current_provider", defaults.current_provider)),
             current_model=str(payload.get("current_model", defaults.current_model)),
+            use_ai_questions=bool(payload.get("use_ai_questions", defaults.use_ai_questions)),
+            agent_foundry_executable=str(
+                payload.get("agent_foundry_executable", defaults.agent_foundry_executable)
+            ),
+            agent_foundry_working_directory=str(
+                payload.get("agent_foundry_working_directory", defaults.agent_foundry_working_directory)
+            ),
             world_roots=[str(item) for item in world_roots] if isinstance(world_roots, list) else defaults.world_roots,
             providers=[str(item) for item in providers] if isinstance(providers, list) else defaults.providers,
             models_by_provider=normalize_models_by_provider(models_by_provider, defaults.models_by_provider),
@@ -70,6 +80,17 @@ def default_world_roots() -> list[str]:
         str(Path.cwd() / "worlds"),
         "/home/ubuntu/projects/worldcodex/worlds",
     ]
+
+
+def default_agent_foundry_project_dir() -> str:
+    candidates = [
+        Path("/home/ubuntu/projects/kadathic_core/src"),
+        Path("/home/ubuntu/projects/agent_foundry"),
+    ]
+    for path in candidates:
+        if path.exists():
+            return str(path)
+    return ""
 
 
 def normalize_models_by_provider(value: Any, fallback: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -118,6 +139,7 @@ def update_selection(
     world: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    use_ai_questions: bool | None = None,
 ) -> AppSettings:
     if story_project is not None:
         settings.current_story_project = story_project
@@ -127,6 +149,8 @@ def update_selection(
         settings.current_provider = provider
     if model is not None:
         settings.current_model = model
+    if use_ai_questions is not None:
+        settings.use_ai_questions = use_ai_questions
     return settings
 
 

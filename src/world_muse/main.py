@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from .adapters.agent_foundry import generate_setting_question, run_llm_connection_test
+from .command_runner import SubprocessCommandRunner
 from .config import AppSettings, default_config_dir, discover_worlds, load_settings, save_settings, update_selection
 from .state import StoryNode, default_story_structure, find_node_by_id
 from .status import StatusLog
@@ -18,6 +20,7 @@ def build_app(*, config_dir: Path | None = None) -> None:
 
     resolved_config_dir = config_dir or default_config_dir(project_root=Path.cwd())
     settings = load_settings(resolved_config_dir)
+    runner = SubprocessCommandRunner()
     worlds = discover_worlds(settings.world_roots)
     world_options = [world.id for world in worlds]
     if settings.current_world and settings.current_world not in world_options:
@@ -39,6 +42,7 @@ def build_app(*, config_dir: Path | None = None) -> None:
             world_options=world_options,
             structure=structure,
             status_log=status_log,
+            runner=runner,
         )
 
 
@@ -49,6 +53,7 @@ def render_layout(
     world_options: list[str],
     structure: list[StoryNode],
     status_log: StatusLog,
+    runner: SubprocessCommandRunner,
 ) -> None:
     from nicegui import ui
 
@@ -112,6 +117,19 @@ def render_layout(
 
                 def on_next() -> None:
                     wizard.set_current_answer(str(answer_input.value or ""))
+                    if settings.use_ai_questions and not wizard.is_last:
+                        next_index = wizard.index + 1
+                        dynamic_question = generate_setting_question(
+                            settings=settings,
+                            runner=runner,
+                            provider=settings.current_provider,
+                            model=settings.current_model,
+                            step=next_index,
+                            total=wizard.total,
+                            previous_answers=wizard.answers[: next_index],
+                            fallback_question=wizard.questions[next_index],
+                        )
+                        wizard.set_question(next_index, dynamic_question)
                     wizard.next()
                     sync_view()
 
@@ -133,7 +151,14 @@ def render_layout(
                 sync_view()
             dialog.open()
 
-        top_panel(settings, config_dir, world_options, add_status, on_launch_setting_wizard=open_setting_wizard)
+        top_panel(
+            settings,
+            config_dir,
+            world_options,
+            add_status,
+            runner,
+            on_launch_setting_wizard=open_setting_wizard,
+        )
         with ui.row().classes("w-full grow gap-0 overflow-hidden"):
             def on_select(node: StoryNode) -> None:
                 selected["node"] = node
@@ -169,6 +194,7 @@ def top_panel(
     config_dir: Path,
     world_options: list[str],
     add_status,
+    runner: SubprocessCommandRunner,
     *,
     on_launch_setting_wizard,
 ) -> None:
@@ -197,6 +223,7 @@ def top_panel(
             label="Model",
             with_input=True,
         ).classes("w-56 top-panel-field")
+        ai_switch = ui.switch("AI Questions", value=settings.use_ai_questions).classes("top-panel-field")
 
         def save_project() -> None:
             update_selection(settings, story_project=str(story_input.value or ""))
@@ -224,10 +251,34 @@ def top_panel(
             save_settings(settings, config_dir)
             add_status("info", "Updated model.")
 
+        def save_ai_mode() -> None:
+            update_selection(settings, use_ai_questions=bool(ai_switch.value))
+            save_settings(settings, config_dir)
+            add_status("info", f"AI question mode {'enabled' if settings.use_ai_questions else 'disabled'}.")
+
+        def on_test_llm() -> None:
+            provider = str(provider_select.value or settings.current_provider)
+            model = str(model_select.value or settings.current_model)
+            update_selection(settings, provider=provider, model=model)
+            save_settings(settings, config_dir)
+            result = run_llm_connection_test(
+                settings=settings,
+                runner=runner,
+                provider=provider,
+                model=model,
+            )
+            if result.ok:
+                add_status("info", f"LLM connection OK for {provider}/{model}.")
+            else:
+                detail = (result.result.stderr or result.result.stdout or "unknown error").strip()
+                add_status("error", f"LLM connection failed for {provider}/{model}: {detail}")
+
         story_input.on_value_change(lambda _: save_project())
         world_select.on_value_change(lambda _: save_world())
         provider_select.on_value_change(lambda _: save_provider())
         model_select.on_value_change(lambda _: save_model())
+        ai_switch.on_value_change(lambda _: save_ai_mode())
+        ui.button("Test LLM", on_click=on_test_llm).props("color=secondary")
         ui.button("Create Setting", on_click=on_launch_setting_wizard).props("color=primary")
 
 

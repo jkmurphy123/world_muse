@@ -17,6 +17,8 @@ def test_load_settings_creates_defaults_when_missing(tmp_path):
     assert settings.current_story_project == "my-story"
     assert settings.current_provider == "mock"
     assert settings.current_model == "mock-world-muse-v1"
+    assert settings.use_ai_questions is True
+    assert settings.agent_foundry_executable == "agentfoundry"
     assert app_settings_path(tmp_path).exists()
 
 
