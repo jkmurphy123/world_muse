@@ -14,7 +14,7 @@ class StoryNode:
 
 def default_story_structure() -> list[StoryNode]:
     return [
-        StoryNode("premise", "Premise", "Core concept and narrative promise."),
+        StoryNode("premise", "The World", "Core concept and narrative promise."),
         StoryNode("setting", "Setting", "World rules, tone, geography, and cultural context."),
         StoryNode("characters", "Characters", "Primary cast and motivations."),
         StoryNode(

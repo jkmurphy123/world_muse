@@ -1,10 +1,10 @@
 {
   "agent_foundry_executable": "agent-foundry",
   "agent_foundry_working_directory": "",
-  "current_model": "mock-world-muse-v1",
-  "current_provider": "mock",
+  "current_model": "gpt-4.1",
+  "current_provider": "openai",
   "current_story_project": "my-story",
-  "current_world": "titan-osa",
+  "current_world": "3-witches",
   "models_by_provider": {
     "mock": [
       "mock-world-muse-v1"
