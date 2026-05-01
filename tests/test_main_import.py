@@ -39,6 +39,21 @@ def test_parse_world_get_places_accepts_wrapped_json_output():
     assert main.parse_world_get_places(wrapped) == [{"id": "place.a", "name": "A"}]
 
 
+def test_stringify_for_ui_handles_structured_values():
+    import world_muse.main as main
+
+    assert main.stringify_for_ui(None) == ""
+    assert main.stringify_for_ui("abc") == "abc"
+    assert '"a": 1' in main.stringify_for_ui({"a": 1})
+
+
+def test_clamp_ui_text_truncates_long_values():
+    import world_muse.main as main
+
+    text = "x" * 50
+    assert main.clamp_ui_text(text, limit=20).endswith("[truncated]")
+
+
 def test_build_world_add_place_command_uses_summary_and_description_when_available(monkeypatch):
     import world_muse.main as main
     from world_muse.config import AppSettings

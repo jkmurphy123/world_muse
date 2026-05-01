@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from .adapters.agent_foundry import run_llm_connection_test
+from .adapters.agent_foundry import generate_styled_description, run_llm_connection_test
 from .command_runner import SubprocessCommandRunner
 from .config import AppSettings, default_config_dir, discover_worlds, load_settings, save_settings, update_selection
 from .state import StoryNode, default_story_structure, find_node_by_id
@@ -142,7 +143,39 @@ def render_layout(
                     place_id_input.value = place_id_from_title(str(event.value or ""))
                     place_id_input.update()
 
+                def sync_generate_enabled() -> None:
+                    has_summary = bool(str(place_summary_input.value or "").strip())
+                    generate_description_btn.set_enabled(has_summary)
+
                 place_name_input.on_value_change(sync_place_id)
+                place_summary_input.on_value_change(lambda _: sync_generate_enabled())
+
+                def on_generate_description() -> None:
+                    summary = str(place_summary_input.value or "").strip()
+                    if not summary:
+                        add_status("warning", "Provide a summary before generating description.")
+                        return
+                    current_description = str(place_description_input.value or "").strip()
+                    generated = generate_styled_description(
+                        provider=settings.current_provider,
+                        model=settings.current_model,
+                        style=settings.current_style,
+                        summary=summary,
+                        existing_description=current_description,
+                    )
+                    if not generated.ok:
+                        add_status("error", f"Description generation failed: {generated.error}")
+                        return
+                    place_description_input.value = generated.text
+                    place_description_input.update()
+                    add_status("info", f"Description {'rewritten' if current_description else 'generated'} in {settings.current_style} style.")
+
+                with ui.row().classes("w-full justify-start"):
+                    generate_description_btn = ui.button("Generate Description", on_click=on_generate_description).props(
+                        "color=secondary"
+                    )
+                sync_generate_enabled()
+
                 with ui.row().classes("w-full justify-end gap-2 pt-2"):
                     ui.button("Cancel", on_click=dialog.close).props("flat")
 
@@ -264,6 +297,86 @@ def render_layout(
                     ui.button("Create World", on_click=on_submit_world).props("color=primary")
             dialog.open()
 
+        def open_place_editor(place: dict[str, Any]) -> None:
+            atom_id = str(place.get("id") or "").strip()
+            if not atom_id:
+                add_status("error", "Cannot edit place: missing atom id.")
+                return
+            world_id = str(settings.current_world or "").strip()
+            if not world_id:
+                add_status("error", "Cannot edit place: no current world selected.")
+                return
+            with ui.dialog() as dialog, ui.card().classes("w-[760px] max-w-full"):
+                ui.label("Edit Setting").classes("text-lg font-semibold")
+                title_input = ui.input(label="Place Title", value=str(place.get("name") or "")).classes("w-full")
+                summary_input = ui.input(label="Summary", value=str(place.get("summary") or "")).classes("w-full")
+                description_input = ui.textarea(
+                    label="Description",
+                    value=str(place.get("description") or ""),
+                ).classes("w-full").props("autogrow")
+                with ui.row().classes("w-full justify-end gap-2 pt-2"):
+                    ui.button("Cancel", on_click=dialog.close).props("flat")
+
+                    def on_submit_edit() -> None:
+                        new_name = str(title_input.value or "").strip()
+                        new_summary = str(summary_input.value or "").strip()
+                        new_description = str(description_input.value or "").strip()
+                        if not new_name:
+                            add_status("error", "Place title is required.")
+                            return
+                        patch_payload = {
+                            "schema_version": "worldcodex.patch.v1",
+                            "id": f"world_muse_edit_{atom_id.replace('.', '_')}",
+                            "operations": [
+                                {
+                                    "op": "update_atom",
+                                    "atom_id": atom_id,
+                                    "set": {
+                                        "name": new_name,
+                                        "summary": new_summary,
+                                        "description": new_description,
+                                    },
+                                }
+                            ],
+                        }
+                        worldcodex_cwd = resolve_worldcodex_workdir(settings)
+                        patch_path = ""
+                        result = None
+                        try:
+                            with tempfile.NamedTemporaryFile(
+                                mode="w",
+                                suffix=".json",
+                                prefix="world_muse_patch_",
+                                delete=False,
+                                dir="/tmp",
+                                encoding="utf-8",
+                            ) as tmp:
+                                tmp.write(json.dumps(patch_payload, ensure_ascii=False, indent=2) + "\n")
+                                patch_path = tmp.name
+                            result = runner.run(
+                                ["world", "patch", "apply", world_id, patch_path],
+                                timeout_seconds=90,
+                                cwd=worldcodex_cwd,
+                            )
+                        finally:
+                            if patch_path:
+                                try:
+                                    Path(patch_path).unlink(missing_ok=True)
+                                except OSError:
+                                    pass
+                        if result is None or (not result.ok):
+                            detail = "unknown error"
+                            if result is not None:
+                                detail = (result.stderr or result.stdout or "unknown error").strip()
+                            add_status("error", f"Failed to edit place '{atom_id}': {detail}")
+                            return
+                        add_status("info", f"Updated place '{new_name}'.")
+                        dialog.close()
+                        render_right_panel()
+
+                    ui.button("Submit", on_click=on_submit_edit).props("color=primary")
+            dialog.open()
+
         def open_character_creator() -> None:
             character_node = find_node_by_id(structure, "characters")
             if character_node is None:
@@ -317,50 +430,58 @@ def render_layout(
             def render_right_panel() -> None:
                 right_container.clear()
                 with right_container:
-                    node = selected.get("node")
-                    if node is None:
-                        ui.label("Select a story node").classes("text-xl font-semibold text-slate-800")
-                        return
-                    with ui.row().classes("w-full items-center justify-between"):
-                        ui.label(node.label).classes("text-xl font-semibold text-slate-800")
+                    try:
+                        node = selected.get("node")
+                        if node is None:
+                            ui.label("Select a story node").classes("text-xl font-semibold text-slate-800")
+                            return
+                        with ui.row().classes("w-full items-center justify-between"):
+                            ui.label(node.label).classes("text-xl font-semibold text-slate-800")
+                            if node.id == "setting":
+                                ui.button("Create Setting", on_click=open_setting_wizard).props("color=primary")
+                            elif node.id == "premise":
+                                ui.button("Create World", on_click=open_world_creator).props("color=primary")
+                            elif node.id == "characters":
+                                ui.button("Create Character", on_click=open_character_creator).props("color=primary")
+                        ui.label(clamp_ui_text(node.summary or "No details yet.")).classes("text-sm text-slate-600")
+                        ui.separator().classes("my-2")
+                        ui.label(f"Node ID: {node.id}").classes("text-xs text-slate-500")
+                        ui.label(f"Children: {len(node.children)}").classes("text-xs text-slate-500")
                         if node.id == "setting":
-                            ui.button("Create Setting", on_click=open_setting_wizard).props("color=primary")
-                        elif node.id == "premise":
-                            ui.button("Create World", on_click=open_world_creator).props("color=primary")
-                        elif node.id == "characters":
-                            ui.button("Create Character", on_click=open_character_creator).props("color=primary")
-                    ui.label(node.summary or "No details yet.").classes("text-sm text-slate-600")
-                    ui.separator().classes("my-2")
-                    ui.label(f"Node ID: {node.id}").classes("text-xs text-slate-500")
-                    ui.label(f"Children: {len(node.children)}").classes("text-xs text-slate-500")
-                    if node.id == "setting":
-                        ui.separator().classes("my-2")
-                        ui.label(f"WorldCodex Places ({settings.current_world or 'no world selected'})").classes(
-                            "text-sm font-semibold text-slate-700"
-                        )
-                        places, places_error = load_places_for_current_world()
-                        if places_error:
-                            ui.label(places_error).classes("text-sm text-red-700")
-                        elif not places:
-                            ui.label("No places found. Use Create Setting to add one.").classes("text-sm text-slate-600")
-                        else:
-                            for place in places:
-                                name = str(place.get("name") or "(unnamed)")
-                                atom_id = str(place.get("id") or "(no id)")
-                                summary = str(place.get("summary") or "").strip()
-                                description = str(place.get("description") or "").strip()
-                                ui.label(name).classes("text-sm font-semibold text-slate-700")
-                                ui.label(atom_id).classes("text-xs text-slate-500")
-                                if summary:
-                                    ui.label(summary).classes("text-sm text-slate-700")
-                                if description:
-                                    ui.label(description).classes("text-sm text-slate-600")
-                                ui.separator().classes("my-1")
-                    if node.details:
-                        ui.separator().classes("my-2")
-                        for key, value in node.details.items():
-                            ui.label(key).classes("text-xs font-semibold text-slate-600")
-                            ui.label(value or "(no response)").classes("text-sm text-slate-700")
+                            try:
+                                ui.separator().classes("my-2")
+                                ui.label(f"WorldCodex Places ({settings.current_world or 'no world selected'})").classes(
+                                    "text-sm font-semibold text-slate-700"
+                                )
+                                places, places_error = load_places_for_current_world()
+                                if places_error:
+                                    ui.label(clamp_ui_text(places_error)).classes("text-sm text-red-700")
+                                elif not places:
+                                    ui.label("No places found. Use Create Setting to add one.").classes("text-sm text-slate-600")
+                                else:
+                                    for place in places:
+                                        name = clamp_ui_text(stringify_for_ui(place.get("name") or "(unnamed)"))
+                                        summary = clamp_ui_text(stringify_for_ui(place.get("summary") or "").strip())
+                                        headline = f"{name} - {summary}" if summary else name
+                                        with ui.row().classes("w-full items-center justify-between gap-2"):
+                                            ui.label(headline).classes("text-sm text-slate-700 grow")
+                                            edit_button = ui.button(
+                                                "Edit",
+                                                on_click=lambda p=place: open_place_editor(p),
+                                            ).props("flat color=secondary")
+                                            if not str(place.get("id") or "").strip():
+                                                edit_button.set_enabled(False)
+                                        ui.separator().classes("my-1")
+                            except Exception as exc:  # pragma: no cover - guard UI from blanking on unexpected payloads
+                                ui.label(f"Failed to render places: {exc}").classes("text-sm text-red-700")
+                        if node.details and node.id != "setting":
+                            ui.separator().classes("my-2")
+                            for key, value in node.details.items():
+                                ui.label(clamp_ui_text(key)).classes("text-xs font-semibold text-slate-600")
+                                text = clamp_ui_text(stringify_for_ui(value).strip())
+                                ui.label(text or "(no response)").classes("text-sm text-slate-700")
+                    except Exception as exc:  # pragma: no cover - final safety net
+                        ui.label(f"Failed to render details panel: {exc}").classes("text-sm text-red-700")
 
             render_right_panel()
         status_renderer["render"] = bottom_panel(status_log)
@@ -398,6 +519,11 @@ def top_panel(
             label="Model",
             with_input=True,
         ).classes("w-56 top-panel-field")
+        style_select = ui.select(
+            options=settings.styles,
+            value=settings.current_style,
+            label="Style",
+        ).classes("w-40 top-panel-field")
         ai_switch = ui.switch("AI Questions", value=settings.use_ai_questions).classes("top-panel-field")
 
         def save_project() -> None:
@@ -426,6 +552,11 @@ def top_panel(
             save_settings(settings, config_dir)
             add_status("info", "Updated model.")
 
+        def save_style() -> None:
+            update_selection(settings, style=str(style_select.value or settings.current_style))
+            save_settings(settings, config_dir)
+            add_status("info", f"Style set to {settings.current_style}.")
+
         def save_ai_mode() -> None:
             update_selection(settings, use_ai_questions=bool(ai_switch.value))
             save_settings(settings, config_dir)
@@ -452,6 +583,7 @@ def top_panel(
         world_select.on_value_change(lambda _: save_world())
         provider_select.on_value_change(lambda _: save_provider())
         model_select.on_value_change(lambda _: save_model())
+        style_select.on_value_change(lambda _: save_style())
         ai_switch.on_value_change(lambda _: save_ai_mode())
         ui.button("Test LLM", on_click=on_test_llm).props("color=secondary")
 
@@ -549,6 +681,24 @@ def parse_world_get_places(stdout: str) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
         return [payload]
     return []
+
+
+def stringify_for_ui(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except TypeError:
+        return str(value)
+
+
+def clamp_ui_text(text: str, *, limit: int = 4000) -> str:
+    value = text or ""
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit]}... [truncated]"
 
 
 def parse_json_payload(text: str) -> Any | None:

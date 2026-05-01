@@ -4,6 +4,7 @@
   "current_model": "gpt-4.1",
   "current_provider": "openai",
   "current_story_project": "my-story",
+  "current_style": "Horror",
   "current_world": "3-witches",
   "models_by_provider": {
     "mock": [
@@ -16,6 +17,15 @@
   "providers": [
     "mock",
     "openai"
+  ],
+  "styles": [
+    "Dramatic",
+    "Relaxed",
+    "Urgent",
+    "Suspenseful",
+    "Comedic",
+    "Lurid",
+    "Horror"
   ],
   "use_ai_questions": true,
   "world_roots": [

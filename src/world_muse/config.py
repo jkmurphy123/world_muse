@@ -8,7 +8,9 @@ from typing import Any
 
 DEFAULT_PROVIDER = "mock"
 DEFAULT_MODEL = "mock-world-muse-v1"
+DEFAULT_STYLE = "Dramatic"
 DEFAULT_PROVIDERS = ["mock", "openai"]
+DEFAULT_STYLES = ["Dramatic", "Relaxed", "Urgent", "Suspenseful", "Comedic", "Lurid", "Horror"]
 DEFAULT_MODELS_BY_PROVIDER = {
     "mock": ["mock-world-muse-v1"],
     "openai": ["gpt-4.1"],
@@ -21,11 +23,13 @@ class AppSettings:
     current_world: str = ""
     current_provider: str = DEFAULT_PROVIDER
     current_model: str = DEFAULT_MODEL
+    current_style: str = DEFAULT_STYLE
     use_ai_questions: bool = True
     agent_foundry_executable: str = "agentfoundry"
     agent_foundry_working_directory: str = field(default_factory=lambda: default_agent_foundry_project_dir())
     world_roots: list[str] = field(default_factory=lambda: default_world_roots())
     providers: list[str] = field(default_factory=lambda: list(DEFAULT_PROVIDERS))
+    styles: list[str] = field(default_factory=lambda: list(DEFAULT_STYLES))
     models_by_provider: dict[str, list[str]] = field(
         default_factory=lambda: {key: list(value) for key, value in DEFAULT_MODELS_BY_PROVIDER.items()}
     )
@@ -35,12 +39,16 @@ class AppSettings:
         defaults = cls()
         world_roots = payload.get("world_roots", defaults.world_roots)
         providers = payload.get("providers", defaults.providers)
+        styles = payload.get("styles", defaults.styles)
         models_by_provider = payload.get("models_by_provider", defaults.models_by_provider)
+        normalized_styles = [str(item) for item in styles] if isinstance(styles, list) and styles else defaults.styles
+        configured_style = str(payload.get("current_style", defaults.current_style))
         return cls(
             current_story_project=str(payload.get("current_story_project", defaults.current_story_project)),
             current_world=str(payload.get("current_world", defaults.current_world)),
             current_provider=str(payload.get("current_provider", defaults.current_provider)),
             current_model=str(payload.get("current_model", defaults.current_model)),
+            current_style=configured_style if configured_style in normalized_styles else normalized_styles[0],
             use_ai_questions=bool(payload.get("use_ai_questions", defaults.use_ai_questions)),
             agent_foundry_executable=str(
                 payload.get("agent_foundry_executable", defaults.agent_foundry_executable)
@@ -50,6 +58,7 @@ class AppSettings:
             ),
             world_roots=[str(item) for item in world_roots] if isinstance(world_roots, list) else defaults.world_roots,
             providers=[str(item) for item in providers] if isinstance(providers, list) else defaults.providers,
+            styles=normalized_styles,
             models_by_provider=normalize_models_by_provider(models_by_provider, defaults.models_by_provider),
         )
 
@@ -139,6 +148,7 @@ def update_selection(
     world: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    style: str | None = None,
     use_ai_questions: bool | None = None,
 ) -> AppSettings:
     if story_project is not None:
@@ -149,6 +159,8 @@ def update_selection(
         settings.current_provider = provider
     if model is not None:
         settings.current_model = model
+    if style is not None:
+        settings.current_style = style
     if use_ai_questions is not None:
         settings.use_ai_questions = use_ai_questions
     return settings

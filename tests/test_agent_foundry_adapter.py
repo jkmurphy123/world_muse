@@ -139,3 +139,51 @@ def test_run_direct_openai_connection_test_requires_api_key(monkeypatch):
     result = agent_foundry.run_direct_openai_connection_test(model="gpt-4.1", timeout_seconds=5)
     assert result.ok is False
     assert "OPENAI_API_KEY is not set" in result.stderr
+
+
+def test_generate_styled_description_requires_summary():
+    result = agent_foundry.generate_styled_description(
+        provider="mock",
+        model="mock-world-muse-v1",
+        style="Dramatic",
+        summary="",
+        existing_description="",
+    )
+    assert result.ok is False
+    assert "Summary is required" in result.error
+
+
+def test_generate_styled_description_mock_generate_and_rewrite():
+    generated = agent_foundry.generate_styled_description(
+        provider="mock",
+        model="mock-world-muse-v1",
+        style="Comedic",
+        summary="A floating bazaar above acid clouds.",
+        existing_description="",
+    )
+    rewritten = agent_foundry.generate_styled_description(
+        provider="mock",
+        model="mock-world-muse-v1",
+        style="Urgent",
+        summary="A floating bazaar above acid clouds.",
+        existing_description="The market drifts and sings.",
+    )
+    assert generated.ok is True
+    assert "[Comedic]" in generated.text
+    assert rewritten.ok is True
+    assert "refined from summary" in rewritten.text
+
+
+def test_build_description_messages_switches_modes():
+    fresh = agent_foundry.build_description_messages(
+        style="Suspenseful",
+        summary="Hidden tunnels beneath the cathedral.",
+        existing_description="",
+    )
+    rewrite = agent_foundry.build_description_messages(
+        style="Suspenseful",
+        summary="Hidden tunnels beneath the cathedral.",
+        existing_description="The tunnels are old and damp.",
+    )
+    assert "Write a fresh description" in fresh[1]["content"]
+    assert "Rewrite the existing description" in rewrite[1]["content"]

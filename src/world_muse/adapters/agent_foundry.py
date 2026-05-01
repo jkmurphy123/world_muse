@@ -22,6 +22,13 @@ class AgentFoundryConnectionResult:
         return self.result.ok
 
 
+@dataclass(frozen=True)
+class GeneratedTextResult:
+    ok: bool
+    text: str
+    error: str = ""
+
+
 def mock_success_result(command: list[str], message: str) -> CommandResult:
     return CommandResult(
         command=tuple(command),
@@ -191,6 +198,115 @@ def run_direct_openai_connection_test(*, model: str, timeout_seconds: int) -> Co
             stderr=f"OpenAI connection failed: {exc}",
             duration_ms=1,
         )
+
+
+def generate_styled_description(
+    *,
+    provider: str,
+    model: str,
+    style: str,
+    summary: str,
+    existing_description: str,
+    timeout_seconds: int = 60,
+) -> GeneratedTextResult:
+    summary_text = summary.strip()
+    existing_text = existing_description.strip()
+    if not summary_text:
+        return GeneratedTextResult(ok=False, text="", error="Summary is required.")
+    if provider == "mock":
+        return GeneratedTextResult(
+            ok=True,
+            text=build_mock_styled_description(style=style, summary=summary_text, existing_description=existing_text),
+        )
+    if provider != "openai":
+        return GeneratedTextResult(
+            ok=False,
+            text="",
+            error=f"Description generation is only implemented for mock/openai providers (got '{provider}').",
+        )
+    return run_direct_openai_description_generation(
+        model=model,
+        style=style,
+        summary=summary_text,
+        existing_description=existing_text,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def build_description_messages(*, style: str, summary: str, existing_description: str) -> list[dict[str, str]]:
+    if existing_description.strip():
+        task = "Rewrite the existing description in the requested style while preserving core meaning."
+        body = (
+            f"Style: {style}\n"
+            f"Summary: {summary}\n"
+            f"Existing description:\n{existing_description}\n"
+        )
+    else:
+        task = "Write a fresh description from the summary in the requested style."
+        body = f"Style: {style}\nSummary: {summary}\n"
+    system = (
+        "You are assisting a worldbuilding tool. "
+        "Produce one polished paragraph (3-6 sentences), vivid but clear, aligned to requested style. "
+        "Do not use bullet points, markdown, or meta commentary."
+    )
+    user = f"{task}\n\n{body}"
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def run_direct_openai_description_generation(
+    *,
+    model: str,
+    style: str,
+    summary: str,
+    existing_description: str,
+    timeout_seconds: int,
+) -> GeneratedTextResult:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return GeneratedTextResult(ok=False, text="", error="OPENAI_API_KEY is not set.")
+
+    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    url = f"{base_url}/chat/completions"
+    payload = {
+        "model": model,
+        "messages": build_description_messages(style=style, summary=summary, existing_description=existing_description),
+    }
+    req = request.Request(
+        url,
+        method="POST",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=timeout_seconds) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        data = json.loads(raw)
+        text = str(data["choices"][0]["message"]["content"]).strip()
+        if not text:
+            return GeneratedTextResult(ok=False, text="", error="OpenAI returned an empty description.")
+        return GeneratedTextResult(ok=True, text=text)
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(detail)
+            message = str(payload.get("error", {}).get("message") or detail)
+        except json.JSONDecodeError:
+            message = detail
+        return GeneratedTextResult(ok=False, text="", error=f"OpenAI HTTP {exc.code}: {message[:500]}")
+    except Exception as exc:  # pragma: no cover
+        return GeneratedTextResult(ok=False, text="", error=f"OpenAI description generation failed: {exc}")
+
+
+def build_mock_styled_description(*, style: str, summary: str, existing_description: str) -> str:
+    if existing_description:
+        return f"[{style}] {existing_description} (refined from summary: {summary})"
+    return f"[{style}] {summary}"
 
 
 def generate_setting_question(

@@ -3,6 +3,7 @@
   "agent_foundry_working_directory": "/home/ubuntu/projects/kadathic_core/src",
   "current_model": "mock-world-muse-v1",
   "current_provider": "mock",
+  "current_style": "Dramatic",
   "current_story_project": "my-story",
   "current_world": "titan-osa",
   "models_by_provider": {
@@ -16,6 +17,15 @@
   "providers": [
     "mock",
     "openai"
+  ],
+  "styles": [
+    "Dramatic",
+    "Relaxed",
+    "Urgent",
+    "Suspenseful",
+    "Comedic",
+    "Lurid",
+    "Horror"
   ],
   "use_ai_questions": true,
   "world_roots": [
